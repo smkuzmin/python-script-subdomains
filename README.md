@@ -1,3 +1,4 @@
+```
 Subdomains v1.8 - Subdomain Finder
 
 Reads a list of root domains, discovers their subdomains using public online
@@ -10,3 +11,4 @@ USAGE:
   cat domains.lst | subdomains
   subdomains < domains.lst
   subdomains < domains.lst > subdomains.lst
+```
