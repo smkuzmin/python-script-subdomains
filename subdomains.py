@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env python3
 """
-Subdomains v1.8 - Subdomain Finder
+Subdomains v1.9 - Subdomain Finder
 
 Reads a list of root domains, discovers their subdomains using public online
 sources (certificate databases and passive DNS), and outputs the root domain
@@ -46,7 +46,7 @@ def _clean_name(name: str) -> str:
 def http_get(url: str, timeout: int = REQUEST_TIMEOUT) -> str:
     """Заменитель requests.get() на urllib. Возвращает текст или пустую строку при ошибке."""
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Subdomains/1.8"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Subdomains/1.9"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="ignore")
     except (urllib.error.HTTPError, urllib.error.URLError, Exception):
@@ -145,7 +145,6 @@ def main():
             try:
                 print()
                 print('# ' + root)
-                print(root)
                 for sub in valid_subs:
                     print(sub)
                 time.sleep(DELAY_BETWEEN_DOMAINS)
