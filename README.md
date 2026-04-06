@@ -1,5 +1,5 @@
 ```
-Subdomains v1.8 - Subdomain Finder
+Subdomains v1.9 - Subdomain Finder
 
 Reads a list of root domains, discovers their subdomains using public online
 sources (certificate databases and passive DNS), and outputs the root domain
