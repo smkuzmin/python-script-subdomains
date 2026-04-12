@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env python3
 """
-Subdomains v1.11 - Subdomain Finder
+Subdomains v1.12 - Subdomain Finder
 
 Reads a list of root domains, discovers their subdomains using public online
 sources (certificate databases and passive DNS), and outputs the root domain
@@ -163,7 +163,7 @@ def _clean_name(name: str) -> str:
 def http_get(url: str, timeout: int = REQUEST_TIMEOUT) -> str:
     """Заменитель requests.get() на urllib. Возвращает текст или пустую строку при ошибке."""
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Subdomains/1.11"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Subdomains/1.12"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="ignore")
     except (urllib.error.HTTPError, urllib.error.URLError, Exception):
@@ -340,10 +340,10 @@ def main():
                 sys.exit(1)
         elif arg in ('-r', '--resolved-only'):
             resolved_only = True
-        elif arg in ('-l', '--resolved-lan-only'):
-            resolved_lan_only = True
         elif arg in ('-w', '--resolved-wan-only'):
             resolved_wan_only = True
+        elif arg in ('-l', '--resolved-lan-only'):
+            resolved_lan_only = True
         elif arg in ('-h', '--help'):
             print(__doc__, file=sys.stderr)
             sys.exit(0)
@@ -354,7 +354,16 @@ def main():
 
     # Чтение корневых доменов из stdin
     # Игнорируем пустые строки и комментарии (начинающиеся с #)
-    roots = [line.strip() for line in sys.stdin if line.strip() and not line.startswith('#')]
+    # Также удаляем inline-комментарии после #
+    roots = []
+    for line in sys.stdin:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        # Удаляем inline-комментарий
+        domain = line.split('#')[0].strip()
+        if domain:
+            roots.append(domain)
 
     # Если вход пустой - завершаемся без вывода
     if not roots:
