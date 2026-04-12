@@ -55,15 +55,15 @@ def _dns_query(qname, qtype, nameservers, timeout=RESOLVE_TIMEOUT):
     txn_id = random.randint(0, 65535)
     flags = 0x0100  # стандартный рекурсивный запрос
     header = struct.pack('>HHHHHH', txn_id, flags, 1, 0, 0, 0)
-    
+
     # Формируем вопрос
     question = b''
     for label in qname.rstrip('.').split('.'):
         question += bytes([len(label)]) + label.encode('ascii')
     question += b'\x00' + struct.pack('>HH', qtype, 1)  # тип, класс=IN
-    
+
     packet = header + question
-    
+
     # Пробуем сервера по очереди
     for ns in nameservers:
         try:
@@ -72,7 +72,7 @@ def _dns_query(qname, qtype, nameservers, timeout=RESOLVE_TIMEOUT):
             sock.sendto(packet, (ns, 53))
             data, _ = sock.recvfrom(512)  # UDP-ответ обычно <=512 байт
             sock.close()
-            
+
             # Парсим ответ (минимально: только ответы на наш вопрос)
             # Пропускаем заголовок и вопрос
             offset = 12  # заголовок
@@ -80,7 +80,7 @@ def _dns_query(qname, qtype, nameservers, timeout=RESOLVE_TIMEOUT):
             while offset < len(data) and data[offset] != 0:
                 offset += data[offset] + 1
             offset += 5  # null-байт + 2 байта тип + 2 байта класс
-            
+
             # Читаем ответы
             answers = []
             ancount = struct.unpack('>H', data[6:8])[0]
@@ -98,12 +98,12 @@ def _dns_query(qname, qtype, nameservers, timeout=RESOLVE_TIMEOUT):
                         break
                     else:
                         offset += length + 1
-                
+
                 if offset + 10 > len(data):
                     break
                 atype, aclass, ttl, rdlen = struct.unpack('>HHIH', data[offset:offset+10])
                 offset += 10
-                
+
                 if atype == 1 and qtype == 1:  # A-запись
                     if rdlen == 4:
                         ip = '.'.join(str(b) for b in data[offset:offset+4])
@@ -125,9 +125,9 @@ def _dns_query(qname, qtype, nameservers, timeout=RESOLVE_TIMEOUT):
                             rdata_offset += length
                     if name_parts:
                         answers.append('.'.join(name_parts).rstrip('.').lower())
-                
+
                 offset += rdlen
-            
+
             if answers:
                 return answers
         except:
@@ -270,25 +270,25 @@ def filter_by_resolution(subs: list, dns_servers: list, resolved_only: bool, wan
     """
     if not (resolved_only or wan_only or lan_only):
         return subs
-    
+
     result = []
     for sub in subs:
         ips = resolve_domain(sub, dns_servers)
-        
+
         if resolved_only and not ips:
             continue
         if wan_only and not any(not is_private_ip(ip) for ip in ips):
             continue
         if lan_only and not any(is_private_ip(ip) for ip in ips):
             continue
-        
+
         # Если прошли все фильтры - добавляем
         if (resolved_only or wan_only or lan_only):
             # Дополнительная проверка: если указан wan_only/lan_only, но резолв пустой - пропускаем
             if (wan_only or lan_only) and not ips:
                 continue
             result.append(sub)
-    
+
     return result
 
 def collect_for_domain(root: str) -> list:
@@ -367,11 +367,11 @@ def main():
                 # Применяем фильтрацию по резолву, если заданы соответствующие флаги
                 if resolved_only or resolved_wan_only or resolved_lan_only:
                     valid_subs = filter_by_resolution(valid_subs, custom_dns, resolved_only, resolved_wan_only, resolved_lan_only)
-                    
+
                     # При фильтрации: если корневой домен резолвится — добавляем его в список
                     if resolve_domain(root, custom_dns) and root not in valid_subs:
                         valid_subs.append(root)
-                    
+
                     # При фильтрации выводим только если есть результаты
                     if valid_subs:
                         print()
@@ -390,7 +390,7 @@ def main():
                         # Проверяем, резолвится ли корневой домен
                         if resolve_domain(root, custom_dns):
                             output_subs.add(root)
-                    
+
                     print()
                     print('# ' + root)
                     # Корневой домен первым, затем отсортированные поддомены (без корня)
