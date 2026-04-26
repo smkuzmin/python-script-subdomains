@@ -1,5 +1,5 @@
 ```
-Subdomains v1.12 - Subdomain Finder
+SDFind v1.12 - Subdomain Finder
 
 Reads a list of root domains, discovers their subdomains using public online
 sources (certificate databases and passive DNS), and outputs the root domain
@@ -8,8 +8,8 @@ and all its subdomains.
 No brute-force, no noise: only real subdomains found in public records.
 
 USAGE:
-  cat infile.lst | subdomains [OPTIONS]
-  subdomains [OPTIONS] < infile.lst > outfile.lst
+  cat infile.lst | sdfind [OPTIONS]
+  sdfind [OPTIONS] < infile.lst > outfile.lst
 
 OPTIONS:
   -r, --resolved-only        Output only successfully resolved entries
