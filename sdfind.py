@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env python3
 """
-SDFind v1.12 - Subdomain Finder
+SDFind v1.13 - Subdomain Finder
 
 Reads a list of root domains, discovers their subdomains using public online
 sources (certificate databases and passive DNS), and outputs the root domain
@@ -134,21 +134,19 @@ def _dns_query(qname, qtype, nameservers, timeout=RESOLVE_TIMEOUT):
             continue
     return None
 
-def _rdns_custom(ip, nameservers, short=False):
-    """Обратный DNS через кастомные сервера (PTR-запрос)"""
-    # Формируем reverse-имя: 1.2.3.4 -> 4.3.2.1.in-addr.arpa
-    rev_name = '.'.join(reversed(ip.split('.'))) + '.in-addr.arpa'
-    results = _dns_query(rev_name, 12, nameservers)  # 12 = PTR
-    if results:
-        h = results[0]
-        return h.split('.')[0] if short else h
-    return None
-
 def _fwd_custom(host, nameservers):
-    """Прямой DNS через кастомные сервера (A-запрос)"""
+    """Прямой DNS через кастомные сервера (A-запрос). Возвращает только валидные IPv4."""
     results = _dns_query(host, 1, nameservers)  # 1 = A
     if results:
-        return sorted(set(results), key=lambda x: tuple(map(int, x.split('.'))))
+        # Дополнительная фильтрация на случай мусора в ответах
+        valid = []
+        for ip in results:
+            try:
+                ipaddress.ip_address(ip)
+                valid.append(ip)
+            except ValueError:
+                continue
+        return sorted(set(valid), key=lambda x: tuple(map(int, x.split('.'))))
     return []
 
 def _clean_name(name: str) -> str:
@@ -163,7 +161,7 @@ def _clean_name(name: str) -> str:
 def http_get(url: str, timeout: int = REQUEST_TIMEOUT) -> str:
     """Заменитель requests.get() на urllib. Возвращает текст или пустую строку при ошибке."""
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 SDFind/1.12"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 SDFind/1.13"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="ignore")
     except (urllib.error.HTTPError, urllib.error.URLError, Exception):
@@ -174,8 +172,7 @@ def fetch_certspotter(root: str) -> set:
     try:
         url = f"https://api.certspotter.com/v1/issuances?domain={quote(root)}&include_subdomains=true&expand=dns_names"
         text = http_get(url)
-        if not text:
-            return set()
+        if not text: return set()
         data = json.loads(text)
         subs = set()
         for item in data:
@@ -190,14 +187,12 @@ def fetch_hackertarget(root: str) -> set:
     try:
         url = f"https://api.hackertarget.com/hostsearch/?q={quote(root)}"
         text = http_get(url)
-        if not text:
-            return set()
+        if not text: return set()
         subs = set()
         for line in text.strip().splitlines():
             if "," in line:
                 sub = _clean_name(line.split(",")[0])
-                if sub:
-                    subs.add(sub)
+                if sub: subs.add(sub)
         return subs
     except Exception:
         return set()
@@ -207,26 +202,22 @@ def fetch_crtsh(root: str) -> set:
     try:
         url = f"https://crt.sh/?q=%.{quote(root)}&output=json"
         text = http_get(url)
-        if not text:
-            return set()
+        if not text: return set()
         data = json.loads(text)
         subs = set()
         for item in data:
             # name_value может содержать несколько доменов через \n
             for name in str(item.get("name_value", "")).split("\n"):
                 sub = _clean_name(name)
-                if sub:
-                    subs.add(sub)
+                if sub: subs.add(sub)
         return subs
     except (json.JSONDecodeError, ValueError, TypeError):
         return set()
 
 def is_valid_subdomain(sub: str, root: str) -> bool:
     """Проверка: является ли строка корректным поддоменом заданного корневого домена"""
-    if not sub or sub.startswith("*"):
-        return False
-    if not VALID_DOMAIN_RE.match(sub):
-        return False
+    if not sub or sub.startswith("*"): return False
+    if not VALID_DOMAIN_RE.match(sub): return False
     # Допускаем точное совпадение с корневым доменом или суффикс .root
     return sub == root or sub.endswith(f".{root}")
 
@@ -240,33 +231,41 @@ def is_private_ip(ip_str: str) -> bool:
 
 def resolve_domain(domain: str, dns_servers: list = None) -> list:
     """
-    Резолвит домен.
-    Если указаны dns_servers - использует встроенный минимальный DNS-клиент (_fwd_custom).
-    Иначе - системный socket.getaddrinfo().
-    Возвращает список найденных IPv4-адресов или пустой список при ошибке.
+    Резолвит домен и возвращает ТОЛЬКО валидные IPv4-адреса.
+    Если dns_servers указаны -> кастомный UDP клиент.
+    Иначе -> системный сокет, строго AF_INET.
     """
-    if dns_servers:
-        # Используем кастомный DNS-клиент
-        return _fwd_custom(domain, dns_servers)
-    else:
-        # Используем системный резолвер
-        try:
+    try:
+        if dns_servers:
+            # Используем кастомный DNS-клиент
+            return _fwd_custom(domain, dns_servers) or []
+        else:
+            # Используем системный резолвер
             old_timeout = socket.getdefaulttimeout()
             socket.setdefaulttimeout(RESOLVE_TIMEOUT)
-            results = socket.getaddrinfo(domain, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-            # Фильтруем только IPv4 (AF_INET)
-            ips = list(set(r[4][0] for r in results if r[0] == socket.AF_INET and len(r[4]) >= 1))
+            infos = socket.getaddrinfo(domain, None, socket.AF_INET, socket.SOCK_STREAM)
+            # Извлекаем только валидные IPv4 адреса
+            ips = []
+            for info in infos:
+                if info[0] == socket.AF_INET and len(info) >= 5:
+                    try:
+                        ip = info[4][0]
+                        # Валидируем через ipaddress
+                        ipaddress.IPv4Address(ip)
+                        ips.append(ip)
+                    except (IndexError, ValueError):
+                        continue
             socket.setdefaulttimeout(old_timeout)
-            return ips
-        except (socket.gaierror, socket.timeout, OSError, Exception):
-            return []
+            return list(set(ips))
+    except (socket.gaierror, socket.timeout, OSError, Exception):
+        return []
 
 def filter_by_resolution(subs: list, dns_servers: list, resolved_only: bool, wan_only: bool, lan_only: bool) -> list:
     """
-    Фильтрует список поддоменов по результату резолва.
-    - resolved_only: оставить только те, что успешно резолвятся
-    - wan_only: оставить только с публичными (WAN) IP
-    - lan_only: оставить только с приватными (LAN) IP
+    Жёсткая фильтрация по IPv4.
+    - resolved_only: есть хотя бы один IPv4
+    - wan_only: есть хотя бы один ПУБЛИЧНЫЙ IPv4
+    - lan_only: есть хотя бы один ПРИВАТНЫЙ IPv4
     """
     if not (resolved_only or wan_only or lan_only):
         return subs
@@ -274,21 +273,17 @@ def filter_by_resolution(subs: list, dns_servers: list, resolved_only: bool, wan
     result = []
     for sub in subs:
         ips = resolve_domain(sub, dns_servers)
-
-        if resolved_only and not ips:
-            continue
-        if wan_only and not any(not is_private_ip(ip) for ip in ips):
-            continue
-        if lan_only and not any(is_private_ip(ip) for ip in ips):
-            continue
-
-        # Если прошли все фильтры - добавляем
-        if (resolved_only or wan_only or lan_only):
-            # Дополнительная проверка: если указан wan_only/lan_only, но резолв пустой - пропускаем
-            if (wan_only or lan_only) and not ips:
-                continue
-            result.append(sub)
-
+        
+        # 1. Если нет IPv4 адресов -> сразу пропускаем
+        if not ips: continue
+            
+        # 2. Проверка публичности/приватности
+        has_public = any(not is_private_ip(ip) for ip in ips)
+        has_private = any(is_private_ip(ip) for ip in ips)
+        
+        if wan_only and not has_public: continue
+        if lan_only and not has_private: continue
+        result.append(sub)
     return result
 
 def collect_for_domain(root: str) -> list:
@@ -338,12 +333,9 @@ def main():
             else:
                 print("Error: Option --dns requires a value", file=sys.stderr)
                 sys.exit(1)
-        elif arg in ('-r', '--resolved-only'):
-            resolved_only = True
-        elif arg in ('-w', '--resolved-wan-only'):
-            resolved_wan_only = True
-        elif arg in ('-l', '--resolved-lan-only'):
-            resolved_lan_only = True
+        elif arg in ('-r', '--resolved-only'): resolved_only = True
+        elif arg in ('-w', '--resolved-wan-only'): resolved_wan_only = True
+        elif arg in ('-l', '--resolved-lan-only'): resolved_lan_only = True
         elif arg in ('-h', '--help'):
             print(__doc__, file=sys.stderr)
             sys.exit(0)
@@ -358,12 +350,10 @@ def main():
     roots = []
     for line in sys.stdin:
         line = line.strip()
-        if not line or line.startswith('#'):
-            continue
+        if not line or line.startswith('#'): continue
         # Удаляем inline-комментарий
         domain = line.split('#')[0].strip()
-        if domain:
-            roots.append(domain)
+        if domain: roots.append(domain)
 
     # Если вход пустой - завершаемся без вывода
     if not roots:
@@ -375,19 +365,36 @@ def main():
             try:
                 # Применяем фильтрацию по резолву, если заданы соответствующие флаги
                 if resolved_only or resolved_wan_only or resolved_lan_only:
+                    # 1. Сначала фильтруем ВСЕ поддомены, включая те, что пришли из источников
                     valid_subs = filter_by_resolution(valid_subs, custom_dns, resolved_only, resolved_wan_only, resolved_lan_only)
 
-                    # При фильтрации: если корневой домен резолвится — добавляем его в список
-                    if resolve_domain(root, custom_dns) and root not in valid_subs:
+                    # 2. Теперь проверяем корневой домен: добавляем его только если он проходит фильтр
+                    # (даже если он был в valid_subs до фильтрации)
+                    root_ips = resolve_domain(root, custom_dns)
+                    root_passes_filter = False
+                    
+                    if resolved_only and root_ips:
+                        root_passes_filter = True
+                    elif resolved_wan_only and root_ips and any(not is_private_ip(ip) for ip in root_ips):
+                        root_passes_filter = True
+                    elif resolved_lan_only and root_ips and any(is_private_ip(ip) for ip in root_ips):
+                        root_passes_filter = True
+                    
+                    # Если корень прошёл фильтр и ещё не в списке — добавляем
+                    if root_passes_filter and root not in valid_subs:
                         valid_subs.append(root)
+                    # Если корень НЕ прошёл фильтр — удаляем его из списка, если он там есть
+                    elif not root_passes_filter and root in valid_subs:
+                        valid_subs.remove(root)
 
                     # При фильтрации выводим только если есть результаты
                     if valid_subs:
                         print()
                         print('# ' + root)
-                        # Корневой домен первым, затем отсортированные поддомены (без корня)
+                        # выводим первым кореневой домен (только если он в отфильтрованном списке)
+                        if root in valid_subs:
+                            print(root)
                         subs_without_root = sorted(s for s in valid_subs if s != root)
-                        print(root)
                         for sub in subs_without_root:
                             print(sub)
                 else:
